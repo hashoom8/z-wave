@@ -16,7 +16,7 @@
 
 definition(
     name: "life360 smartapp 7",
-    namespace: "smartthings",
+    namespace: "hashoom8",
     author: "SmartThings",
     description: "Life360 Service Manager",
 	category: "SmartThings Labs",
