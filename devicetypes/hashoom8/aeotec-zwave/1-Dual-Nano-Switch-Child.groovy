@@ -14,7 +14,7 @@
  *
  */
 metadata {
-	definition (name: "Metering Switch Child Device", namespace: "aeotec-zwave", author: "Eric Maycock", vid:"generic-switch-power-energy") {
+	definition (name: "Metering Switch Child Device", namespace: "aeotec zwave", author: "Eric Maycock", vid:"generic-switch-power-energy") {
 		capability "Switch"
 		capability "Actuator"
 		capability "Sensor"
