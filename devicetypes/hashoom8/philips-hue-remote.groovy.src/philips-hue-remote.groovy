@@ -14,7 +14,7 @@
  *
  */
 metadata {
-    definition (name: "Hue Dimmer Switch (ZHA)", namespace: "hashoom8", author: "Stephen McLaughlin") {
+    definition (name: "philips hue remote", namespace: "hashoom8", author: "Stephen McLaughlin") {
         capability "Configuration"
         capability "Battery"
         capability "Refresh"
