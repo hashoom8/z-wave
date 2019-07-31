@@ -1,7 +1,5 @@
 /**
- *  Hue Dimmer Switch
- *
- *  Copyright 2016 Stephen McLaughlin
+ *  
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
@@ -13,320 +11,142 @@
  *  for the specific language governing permissions and limitations under the License.
  *
  */
+/* Philips Hue Wireless Dimmer
+
+Capabilities:
+  Actuator
+  Configuration
+  Button
+  Sensor
+  
+    
+*/
+
 metadata {
-    definition (name: "philips hue remote", namespace: "hashoom8", author: "Stephen McLaughlin") {
-        capability "Configuration"
-        capability "Battery"
-        capability "Refresh"
-        capability "Button"
-        capability "Sensor"
+	definition (name: "philips hue remot", namespace: "hashoom8", author: "Scott G") {
+		capability "Actuator"
+		capability "Button"
+		capability "Configuration"
+		capability "Sensor"
 
-        fingerprint profileId: "0104", endpointId: "02", application:"02", outClusters: "0019", inClusters: "0000,0001,0003,000F,FC00", manufacturer: "Philips", model: "RWL020", deviceJoinName: "Hue Dimmer Switch (ZHA)"
+		// fingerprint specific to Hue remote taken from Basic Cluster.
+		fingerprint profileId: "C05E", inClusters: "0000", outClusters: "0000,0003,0004,0006,0008", manufacturer: "Philips", model: "RWL020"
+	}
 
-        attribute "lastAction", "string"
-    }
+	// simulator metadata
+	simulator {
+		// status messages
 
+	}
 
-    simulator {
-        // TODO: define status and reply messages here
-    }
-
-    tiles(scale: 2) {
-        // TODO: define your main and details tiles here
-        multiAttributeTile(name:"lastAction", type: "generic", width: 6, height: 4){
-            tileAttribute ("device.battery", key: "SECONDARY_CONTROL") {
-                attributeState "battery", label:'${currentValue}% battery',icon:"st.Outdoor.outdoor3", unit:"", backgroundColors:[
-                [value: 30, color: "#ff0000"],
-                [value: 40, color: "#760000"],
-                [value: 60, color: "#ff9900"],
-                [value: 80, color: "#007600"]
-                ]
-            }
-            tileAttribute ("device.lastAction", key: "PRIMARY_CONTROL") {
-                attributeState "active", label:'${currentValue}', icon:"st.Home.home30"
-            }
-
-        }
-        //        valueTile("lastAction", "device.lastAction", width: 6, height: 2) {
-        //			state("lastAction", label:'${currentValue}')
-        //		}
-
-        valueTile("battery2", "device.battery", decoration: "flat", inactiveLabel: false, width: 5, height: 1) {
-            state("battery", label:'${currentValue}% battery', unit:"")
-        }
-        standardTile("refresh", "device.refresh", inactiveLabel: false, decoration: "flat", width: 1, height: 1) {
-            state "default", label:"", action:"refresh.refresh", icon:"st.secondary.refresh"
-        }
-        //        standardTile("configure", "device.configure", inactiveLabel: false, decoration: "flat", width: 2, height: 2) {
-        //            state "default", label:"bind", action:"configure"
-        //        }
-
-    }
-
-    main "lastAction"
-    details(["lastAction","battery2","refresh","configure"])
-
+	// UI tile definitions
+	tiles {
+		standardTile("button", "device.button", width: 2, height: 2) {
+			state "default", label: "", icon: "st.unknown.zwave.remote-controller", backgroundColor: "#ffffff"
+		}
+		main "button"
+		details(["button"])
+	}
 }
 
-// parse events into attributes
+// Parse incoming device messages to generate events
 def parse(String description) {
+	// next line is debugging code to see raw zigbee message. no longer needed
+	// log.trace description
+    
+    // Create a map from the raw zigbee message to make parsing more intuitive
     def msg = zigbee.parse(description)
-
-    //log.warn msg
-    /// Actual code down here
-    List map = []
-    if (description?.startsWith('catchall:')) {
-        map = parseCatchAllMessage(description)
+    
+    // Check if the message comes from the on/off cluster (0x0006 in zigbee) to determine if button was On or Off
+    if (msg.clusterId == 6) {
+    	
+    	// Command 1 is the zigbee 'on' command, so make that button 1. Else it must be 'off' command, make that button 4.
+    	// Then create the button press event. All button events with be of type "pushed", not "held".
+    	def button = (msg.command == 1 ? 1 : 4)
+        def result = createEvent(name: "button", value: "pushed", data: [buttonNumber: button], descriptionText: "$device.displayName button $button was pushed", isStateChange: true)
+        log.debug "Parse returned ${result?.descriptionText}"
+        return result
+  
     }
-
-
-
-    def result = map ? map : null
-
-    if (description?.startsWith('enroll request')) {
-        List cmds = enrollResponse()
-        result = cmds?.collect { new physicalgraph.device.HubAction(it) }
-    }
-    else if (description?.startsWith('read attr -')) {
-        result = parseReportAttributeMessage(description).each { createEvent(it) }
-    }
-
-    return result
-
-    // TODO: handle 'numberOfButtons' attribute
-
-}
-/*
-parseReportAttributeMessage
- */
-private List parseReportAttributeMessage(String description) {
-    Map descMap = (description - "read attr - ").split(",").inject([:]) { map, param ->
-        def nameAndValue = param.split(":")
-        map += [(nameAndValue[0].trim()):nameAndValue[1].trim()]
-    }
-
-    List result = []
-
-    // Battery
-    if (descMap.cluster == "0001" && descMap.attrId == "0020") {
-        // log.warn descMap
-        result << getBatteryResult(Integer.parseInt(descMap.value, 16))
-    }
-
-    return result
-}
-
-private boolean shouldProcessMessage(cluster) {
-    // 0x0B is default response indicating message got through
-    boolean ignoredMessage = cluster.profileId != 0x0104 ||
-    cluster.command == 0x0B ||
-    (cluster.data.size() > 0 && cluster.data.first() == 0x3e)
-    return !ignoredMessage
-}
-
-/*
-getBatteryResult
- */
-//TODO: needs calibration
-private Map getBatteryResult(rawValue) {
-    //log.debug "Battery rawValue = ${rawValue}"
-
-    def result = [
-    name: 'battery',
-    value: '--',
-    translatable: true
-    ]
-
-    def volts = rawValue / 10
-
-    if (rawValue == 0 || rawValue == 255) {}
-    else {
-        if (volts > 3.5) {
-            result.descriptionText = "{{ device.displayName }} battery has too much power: (> 3.5) volts."
+    
+    // Check if message comes from the level cluster (0x0008 in zigbee) to determine if button was dim up/down
+    if (msg.clusterId == 8) {
+    	
+    	// Remote sends move level and stop commands when dim up/down pushed or held
+    	// Additional parsing and debugging created for when buttons are held, but not creating events for them
+    	// since it is difficult to separate them from pushed events
+    	switch (msg.command) 
+        {
+        	// Move level command means dim/up down was pushed or held
+        	case 2:
+            	
+            	// Position -6 and -5 is the two digit hex of the move step size, which is different for an initial push vs a hold
+            	// Check it for the initial push value '1E'
+                def y = description[-6..-5]
+                if (y == "1E") {
+            		
+            	    // Determine the button push by looking at the move direction determined in position -8 and -7
+            	    // "00" means to move up in level, so dim up button was pushed. Create button event
+                    def button = (description[-8..-7] == "00" ? 2 : 3)
+                	def result = createEvent(name: "button", value: "pushed", data: [buttonNumber: button], descriptionText: "$device.displayName button $button was pushed", isStateChange: true)
+                    log.debug "Parse returned ${result?.descriptionText}"
+                    return result
+					break
+                }
+                // If move step size is not '1E' then the button is being held. Send debug message, but take no action
+                log.debug "Received held message"
+                break
+         	
+            case 3:
+            	// If level command is 3, then stop moving command was sent. Send debug message, but take no action.
+            	// This stop command could be used to get a button 'held' event, but we would need to ignore the initial button push
+            	log.debug "Received stop message"
+                break
+                
         }
-        else {
-            if (device.getDataValue("manufacturer") == "SmartThings") {
-                volts = rawValue // For the batteryMap to work the key needs to be an int
-                def batteryMap = [28:100, 27:100, 26:100, 25:90, 24:90, 23:70,
-                22:70, 21:50, 20:50, 19:30, 18:30, 17:15, 16:1, 15:0]
-                def minVolts = 15
-                def maxVolts = 28
-
-                if (volts < minVolts)
-                    volts = minVolts
-                else if (volts > maxVolts)
-                    volts = maxVolts
-                    def pct = batteryMap[volts]
-                    if (pct != null) {
-                        result.value = pct
-                        result.descriptionText = "{{ device.displayName }} battery was {{ value }}%"
-                    }
-            }
-            else {
-                def minVolts = 2.1
-                def maxVolts = 3.0
-                def pct = (volts - minVolts) / (maxVolts - minVolts)
-                def roundedPct = Math.round(pct * 100)
-                if (roundedPct <= 0)
-                    roundedPct = 1
-                    result.value = Math.min(100, roundedPct)
-                    result.descriptionText = "{{ device.displayName }} battery was {{ value }}%"
-            }
-        }
-    }
-
-    return result
-}
-
-private List getButtonResult(rawValue) {
-    def result
-    def button = rawValue[0]
-    def buttonState = rawValue[4]
-    def buttonHoldTime = rawValue[6]
-    def hueStatus = (button as String) + "00" + (buttonState as String) // This is the state in the HUE api
-    log.error "Button: " + button + "  Hue Code: " + hueStatus + "  Hold Time: " + buttonHoldTime + "  Button State: " + buttonState
-    //   result.data = ['buttonNumber': button]
-
-    def buttonName
-
-	// Name of the button
-    if ( button == 1 ) { 
-        buttonName = "on"
-    }
-    else if ( button == 2 ) { 
-        buttonName = "up" 
-    }
-    else if ( button == 3 ) {
-        buttonName = "down" 
-    }
-    else if ( button == 4 ) { 
-        buttonName = "off" 
-    }
-
-	// The button is pressed, aka: pushed + released, with 0 hold time
-    if ( buttonState == 0 ) {
-        result = [createEvent(name: "button", value: "pressed_" + buttonName, data: [buttonNumber: buttonName], descriptionText: "$device.displayName button $button was pushed", isStateChange: true)]
-        sendEvent(name: "lastAction", value: buttonName + " pressed")
-    } 
-	// The button is pressed, aka: pushed + released, with at least 1s hold time
-    else if ( buttonState == 2 ) {
-        result = [
-        createEvent(name: "button", value: "pushed_" + buttonName, data: [buttonNumber: buttonName], descriptionText: "$device.displayName button $button was pushed", isStateChange: true),
-        createEvent(name: "button", value: "released_" + buttonName, data: [buttonNumber: buttonName], descriptionText: "$device.displayName button $button was pushed", isStateChange: true)
-        ]
-        sendEvent(name: "lastAction", value: buttonName + " pushed")
-        sendEvent(name: "lastAction", value: buttonName + " released")
-    } 
-	// The button is released, with at least 1s hold time. This code happens after the button is held
-    else if ( buttonState == 3 ) {
-        result = [
-        createEvent(name: "button", value: "released_" + buttonName, data: [buttonNumber: buttonName], descriptionText: "$device.displayName button $button was pushed", isStateChange: true)
-        ]
-        sendEvent(name: "lastAction", value: buttonName + " released")
-    } 
-	// The button is held
-    else if ( buttonHoldTime == 8 ) {
-        result = [createEvent(name: "button", value: "held_" + buttonName, data: [buttonNumber: buttonName], descriptionText: "$device.displayName button $button was held", isStateChange: true)]
-        sendEvent(name: "lastAction", value: buttonName + " held")
-    } 
-    else {
-        return
-    }
-    return result
-
-}
-
-/*
-parseCatchAllMessage
- */
-private List parseCatchAllMessage(String description) {
-    List resultMap = []
-    def cluster = zigbee.parse(description)
-    if (shouldProcessMessage(cluster)) {
-        switch(cluster.clusterId) {
-            case 0x0001:
-            // 0x07 - configure reporting
-            if (cluster.command != 0x07) {
-                resultMap = [getBatteryResult(cluster.data.last())]
-            }
-            break
-
-            case 0xFC00:
-            if ( cluster.command == 0x00 ) {
-                resultMap = getButtonResult( cluster.data );
-            }
-            break
-
-        }
-    }
-
-    return resultMap
+     }   
+    
 }
 
 
-def refresh() {
-    //log.debug "Refresh"
-
-    def refreshCmds = []
-
-    refreshCmds += "st rattr 0x${device.deviceNetworkId} 0x02 0x0001 0x0020"; // WORKS! - Fetches battery from 0x02
-
-
-    //   configCmds += zigbee.configureReporting(0x406,0x0000, 0x18, 30, 600, null) // motion // confirmed
-
-    //refreshCmds += zigbee.configureReporting(0x000F, 0x0055, 0x10, 30, 30, null);
-    //	refreshCmds += "zdo bind 0xDAD6 0x01 0x02 0x000F {00178801103317AA} {}"
-    //    refreshCmds += "delay 2000"
-    //    refreshCmds += "st cr 0xDAD6 0x02 0x000F 0x0055 0x10 0x001E 0x001E {}"
-    //    refreshCmds += "delay 2000"
-
-    //refreshCmds += zigbee.configureReporting(0x000F, 0x006F, 0x18, 0x30, 0x30);
-    //	refreshCmds += "zdo bind 0x${device.deviceNetworkId} 0x02 0x02 0xFC00 {${device.zigbeeId}} {}"
-    //   refreshCmds += "delay 2000"
-    //  refreshCmds += "st cr 0x${device.deviceNetworkId} 0x02 0xFC00 0x0000 0x18 0x001E 0x001E {}"
-    //  refreshCmds += "delay 2000"
-    //log.debug refreshCmds
-
-    return refreshCmds
-}
-
+// Configuration runs during device join
 def configure() {
-    //	String zigbeeId = swapEndianHex(device.hub.zigbeeId)
-    //log.debug "Configiring Reporting and Bindings."
-    def configCmds = []
 
-    // Configure Button Count
-    sendEvent(name: "numberOfButtons", value: 4, displayed: false)
+	log.debug "configure"
+	String zigbeeId = swapEndianHex(device.hub.zigbeeId)
+	log.debug "Confuguring Reporting and Bindings."
+	def configCmds = [	
+		
+		// Bind the outgoing on/off cluster from remote to hub, so remote sends hub messages when On/Off buttons pushed
+        	"zdo bind 0x${device.deviceNetworkId} 1 1 6 {${device.zigbeeId}} {}", "delay 1000",
+		
+		// Bind the outgoing level cluster from remote to hub, so remote sends hub messages when Dim Up/Down buttons pushed
+		"zdo bind 0x${device.deviceNetworkId} 1 1 8 {${device.zigbeeId}} {}", "delay 500",
+        
+	]
+    return configCmds 
 
-    // Monitor Buttons
-    //TODO: This could be zigbee.configureReporting(0xFC00, 0x0000, 0x18, 0x001e, 0x001e); but no idea how to point it at a different endpoint
-    configCmds += "zdo bind 0x${device.deviceNetworkId} 0x02 0x02 0xFC00 {${device.zigbeeId}} {}"
-    configCmds += "delay 2000"
-    configCmds += "st cr 0x${device.deviceNetworkId} 0x02 0xFC00 0x0000 0x18 0x001E 0x001E {}"
-    configCmds += "delay 2000"
-
-    // Monitor Battery
-    //TODO: This could be zigbee.batteryConfig(); but no idea how to point it at a different endpoint
-    configCmds += "zdo bind 0x${device.deviceNetworkId} 0x02 0x02 0x0001 {${device.zigbeeId}} {}"
-    configCmds += "delay 2000"
-    configCmds += "st cr 0x${device.deviceNetworkId} 0x02 0x0001 0x0020 0x20 0x001E 0x0258 {}"
-    //    configCmds += "st cr 0x${device.deviceNetworkId} 0x02 0x0001 0x0020 0x20 0x001E 0x001e {}"
-
-    configCmds += "delay 2000"
-
-    return configCmds + refresh()
-
-
+   
 }
 
-def configureHealthCheck() {
-    Integer hcIntervalMinutes = 12
-    refresh()
-    sendEvent(name: "checkInterval", value: hcIntervalMinutes * 60, displayed: false, data: [protocol: "zigbee", hubHardwareId: device.hub.hardwareID])
+private getEndpointId() {
+	new BigInteger(device.endpointId, 16).toString()
 }
 
-def updated() {
-    // log.debug "in updated()"
+private String swapEndianHex(String hex) {
+    reverseArray(hex.decodeHex()).encodeHex()
+}
 
-    configureHealthCheck()
+private byte[] reverseArray(byte[] array) {
+    int i = 0;
+    int j = array.length - 1;
+    byte tmp;
+    while (j > i) {
+        tmp = array[j];
+        array[j] = array[i];
+        array[i] = tmp;
+        j--;
+        i++;
+    }
+    return array
 }
