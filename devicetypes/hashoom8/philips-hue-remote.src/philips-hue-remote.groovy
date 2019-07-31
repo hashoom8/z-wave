@@ -23,7 +23,7 @@ Capabilities:
 */
 
 metadata {
-	definition (name: "philips hue remot", namespace: "hashoom8", author: "Scott G") {
+	definition (name: "philips hue remote", namespace: "hashoom8", author: "Scott G") {
 		capability "Actuator"
 		capability "Button"
 		capability "Configuration"
